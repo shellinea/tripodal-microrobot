@@ -1,0 +1,10 @@
+# Python 运行产物
+__pycache__/
+*.pyc
+
+# 编辑器配置
+.vscode/
+
+# 仿真脚本的本地输出（结果图已收录 docs/images/）
+simulation/*.png
+simulation/*.gif
