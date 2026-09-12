@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三足机器人矢量合成 & 公式推导</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 40px 20px;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .main-wrapper {
+            max-width: 900px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .container {
+            background: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 40px;
+        }
+        .control-panel {
+            flex: 1;
+            min-width: 300px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        h2, h3 { margin-top: 0; color: #2c3e50; }
+        .input-group {
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        input[type=range] { width: 100%; cursor: pointer; }
+        input[type=number] {
+            width: 70px;
+            padding: 6px;
+            font-size: 16px;
+            text-align: center;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .info-card {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-left: 5px solid #3498db;
+            border-radius: 5px;
+            line-height: 1.8;
+            font-size: 15px;
+        }
+        .highlight { font-weight: bold; color: #e74c3c; }
+        .main-leg { color: #2980b9; font-weight: bold; }
+        .aux-leg { color: #27ae60; font-weight: bold; }
+        
+        canvas {
+            background: #fff;
+            border: 1px solid #eee;
+            border-radius: 50%;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.05);
+            display: block;
+            margin: 0 auto;
+        }
+
+        /* 数学公式与推导区域样式 */
+        .derivation-card {
+            background: #fff;
+            padding: 25px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+        .math-font {
+            font-family: 'Times New Roman', Times, serif;
+            font-style: italic;
+            font-weight: bold;
+        }
+        /* CSS 纯手工拼装的分数样式，无需外部数学库 */
+        .frac {
+            display: inline-flex;
+            flex-direction: column;
+            vertical-align: middle;
+            text-align: center;
+            margin: 0 4px;
+            line-height: 1.2;
+            font-family: 'Times New Roman', Times, serif;
+        }
+        .frac > span:first-child {
+            border-bottom: 1px solid #333;
+            padding: 2px 4px;
+        }
+        .frac > span:last-child {
+            padding: 2px 4px;
+        }
+        .derivation-step {
+            margin-bottom: 12px;
+            padding-left: 20px;
+            position: relative;
+            line-height: 1.6;
+        }
+        .derivation-step::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #3498db;
+            font-weight: bold;
+        }
+        .eq-block {
+            text-align: center;
+            margin: 15px 0;
+            padding: 10px;
+            background: #f9fbfd;
+            border-radius: 8px;
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+<body>
+
+<div class="main-wrapper">
+    <!-- 顶部：交互控制与可视化 -->
+    <div class="container">
+        <div class="control-panel">
+            <h2>全向运动 K(θ) 算法合成</h2>
+            <p style="color:#666; font-size:14px;">在基础的 6 个方向中，通过主辅腿的差速比 <strong>K</strong>，合成任意方向。</p>
+            
+            <div class="input-group">
+                <label for="angleSlider"><strong>期望角度:</strong></label>
+                <input type="range" id="angleSlider" min="0" max="360" value="80">
+                <input type="number" id="angleInput" min="0" max="360" value="80"> °
+            </div>
+
+            <div class="info-card">
+                <div>偏置角 (θ)：<span id="thetaInfo">40.0°</span> (当前所在扇区内的相对夹角)</div>
+                <hr style="border:0; border-top:1px solid #ddd; margin: 10px 0;">
+                <div>🔵 主发力轴：<span class="main-leg" id="mainLeg">120°</span>，出力比: <strong>1.0 (100%)</strong></div>
+                
+                <div style="margin-top: 8px;">
+                    🟢 辅发力轴：<span class="aux-leg" id="auxLeg">0°</span>，实时算式：<br>
+                    <div style="display:flex; align-items:center; margin-left: 20px; margin-top:5px;">
+                        <span class="math-font" style="font-size: 1.2em; margin-right: 5px;">K</span> = 
+                        <div class="frac">
+                            <span id="kMathNum">sin(40.0°)</span>
+                            <span id="kMathDen">sin(120° - 40.0°)</span>
+                        </div>
+                        = <strong id="kValue" style="margin-left: 8px; color: #27ae60; font-size: 1.2em;">0.653</strong>
+                    </div>
+                </div>
+                <div style="margin-top: 10px;">🔴 <span class="highlight">合成后实际方向：<span id="resultDir">80.0°</span> 完美吻合期望！</span></div>
+            </div>
+        </div>
+        
+        <div>
+            <canvas id="vectorCanvas" width="360" height="360"></canvas>
+        </div>
+    </div>
+
+    <!-- 底部：算法公式推导面板 -->
+    <div class="derivation-card">
+        <h3>📐 原算法 Note 5 式(8) 推导全过程</h3>
+        <p style="color:#555; margin-bottom: 20px;">
+            为什么偏置输出比正好是 <span class="math-font">K = sin(θ) / sin(120° - θ)</span>？一切源于基础的向量合成与三角函数。
+        </p>
+
+        <div class="derivation-step">
+            建立局部坐标系，假设<strong>主发力腿处于 0° 轴</strong>，因为机器人腿呈120度分布，所以参与合成的<strong>辅发力腿必定在 120° 轴</strong>。
+        </div>
+        <div class="derivation-step">
+            设主发力腿的输出向量为 <span class="math-font">V<sub>m</sub> = (1, 0)</span>，辅发力腿的输出向量为 <span class="math-font">V<sub>n</sub> = (K·cos120°, K·sin120°)</span>。
+        </div>
+        <div class="derivation-step">
+            两腿合成后的合力向量：
+            <div class="eq-block">
+                <span class="math-font">V<sub>合</sub> = (1 + K·cos120°, K·sin120°)</span>
+            </div>
+        </div>
+        <div class="derivation-step">
+            我们期望合成后偏离主腿的角度为 <span class="math-font">θ</span>。根据正切定义 <span class="math-font">tan(θ) = Y / X</span>，列出等式：
+            <div class="eq-block">
+                <span class="math-font">tan(θ) = </span>
+                <div class="frac"><span class="math-font">K·sin120°</span><span class="math-font">1 + K·cos120°</span></div>
+            </div>
+        </div>
+        <div class="derivation-step">
+            将 <span class="math-font">tan(θ)</span> 拆开为 <span class="math-font">sin(θ) / cos(θ)</span> 并交叉相乘：
+            <div class="eq-block" style="font-size: 1em;">
+                <span class="math-font">sin(θ) + K·sin(θ)cos120° = K·cos(θ)sin120°</span>
+            </div>
+        </div>
+        <div class="derivation-step">
+            将含有 <span class="math-font">K</span> 的项移到等号同侧，并提取公因式 <span class="math-font">K</span>：
+            <div class="eq-block" style="font-size: 1em;">
+                <span class="math-font">sin(θ) = K [ sin120°cos(θ) - cos120°sin(θ) ]</span>
+            </div>
+        </div>
+        <div class="derivation-step">
+            根据高中学过的<strong>三角函数差角公式</strong> <span class="math-font">sin(A-B) = sinAcosB - cosAsinB</span>，括号内正好化简为：
+            <div class="eq-block" style="background:#fff3cd; border: 1px solid #ffeeba; color:#856404;">
+                <span class="math-font">sin(θ) = K·sin(120° - θ)</span>
+                &nbsp;&nbsp;&nbsp; ➡️ &nbsp;&nbsp;&nbsp;
+                <span class="math-font" style="font-size: 1.2em;">K = </span>
+                <div class="frac" style="font-size: 1.2em; font-weight:bold;">
+                    <span class="math-font">sin(θ)</span>
+                    <span class="math-font">sin(120° - θ)</span>
+                </div>
+            </div>
+        </div>
+        <p style="text-align: center; color: #888; font-size: 14px; margin-top: 20px;">
+            至此，仅靠初等几何与三角函数，完成了对 360 度全向运动底层力学分配的最优解算。
+        </p>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('vectorCanvas');
+    const ctx = canvas.getContext('2d');
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const scale = 110; 
+
+    const angleSlider = document.getElementById('angleSlider');
+    const angleInput = document.getElementById('angleInput');
+
+    function sectorParams(g) {
+        g = ((g % 360) + 360) % 360; 
+        if (g < 60) return { main: 1, aux: 2, theta: g, mDir: 0, aDir: 120 };
+        if (g < 120) return { main: 2, aux: 1, theta: 120 - g, mDir: 120, aDir: 0 };
+        if (g < 180) return { main: 2, aux: 3, theta: g - 120, mDir: 120, aDir: 240 };
+        if (g < 240) return { main: 3, aux: 2, theta: 240 - g, mDir: 240, aDir: 120 };
+        if (g < 300) return { main: 3, aux: 1, theta: g - 240, mDir: 240, aDir: 0 };
+        return { main: 1, aux: 3, theta: 360 - g, mDir: 0, aDir: 240 };
+    }
+
+    function calculateK(theta) {
+        if (theta === 0) return 0;
+        let radTh = theta * Math.PI / 180;
+        let rad120 = (120 - theta) * Math.PI / 180;
+        return Math.sin(radTh) / Math.sin(rad120);
+    }
+
+    function drawArrow(fromX, fromY, toX, toY, color, width, label) {
+        const headlen = 10;
+        const angle = Math.atan2(toY - fromY, toX - fromX);
+        ctx.beginPath();
+        ctx.moveTo(fromX, fromY);
+        ctx.lineTo(toX, toY);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(toX, toY);
+        ctx.lineTo(toX - headlen * Math.cos(angle - Math.PI / 6), toY - headlen * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(toX - headlen * Math.cos(angle + Math.PI / 6), toY - headlen * Math.sin(angle + Math.PI / 6));
+        ctx.lineTo(toX, toY);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        if (label) {
+            ctx.fillStyle = color;
+            ctx.font = "bold 13px sans-serif";
+            ctx.fillText(label, toX + 15 * Math.cos(angle), toY + 15 * Math.sin(angle));
+        }
+    }
+
+    function updateVisualization() {
+        let g = parseFloat(angleSlider.value);
+        let params = sectorParams(g);
+        let K = calculateK(params.theta);
+
+        // 更新文本面板及动态公式数据
+        document.getElementById('thetaInfo').innerText = `${params.theta.toFixed(1)}°`;
+        document.getElementById('resultDir').innerText = `${g.toFixed(1)}°`;
+        document.getElementById('mainLeg').innerText = `${params.mDir}° 轴`;
+        document.getElementById('auxLeg').innerText = `${params.aDir}° 轴`;
+        
+        // 动态更新实时计算公式
+        document.getElementById('kMathNum').innerText = `sin(${params.theta.toFixed(1)}°)`;
+        document.getElementById('kMathDen').innerText = `sin(120° - ${params.theta.toFixed(1)}°)`;
+        document.getElementById('kValue').innerText = `${K.toFixed(3)}`;
+
+        // 画布绘制逻辑
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. 基础6方向
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 360; i += 60) {
+            let rad = -i * Math.PI / 180; 
+            let x = centerX + Math.cos(rad) * (scale + 30);
+            let y = centerY + Math.sin(rad) * (scale + 30);
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#999';
+            ctx.font = "12px sans-serif";
+            ctx.fillText(`${i}°`, x + 5*Math.cos(rad), y + 5*Math.sin(rad));
+        }
+        ctx.setLineDash([]); 
+
+        let mRad = -params.mDir * Math.PI / 180;
+        let aRad = -params.aDir * Math.PI / 180;
+        
+        let mX = centerX + Math.cos(mRad) * scale * 1.0;
+        let mY = centerY + Math.sin(mRad) * scale * 1.0;
+        
+        let aX = centerX + Math.cos(aRad) * scale * K;
+        let aY = centerY + Math.sin(aRad) * scale * K;
+
+        let resX = centerX + (Math.cos(mRad)*1.0 + Math.cos(aRad)*K) * scale;
+        let resY = centerY + (Math.sin(mRad)*1.0 + Math.sin(aRad)*K) * scale;
+
+        // 3. 平行四边形辅助线
+        ctx.beginPath();
+        ctx.moveTo(mX, mY); ctx.lineTo(resX, resY);
+        ctx.moveTo(aX, aY); ctx.lineTo(resX, resY);
+        ctx.strokeStyle = '#bdc3c7';
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 4. 画向量
+        drawArrow(centerX, centerY, mX, mY, '#2980b9', 3, '主(1.0)');
+        if (K > 0.01) {
+            drawArrow(centerX, centerY, aX, aY, '#27ae60', 3, `辅(${K.toFixed(2)})`);
+        }
+        drawArrow(centerX, centerY, resX, resY, '#e74c3c', 4, `合(${g}°)`);
+    }
+
+    angleSlider.addEventListener('input', function() {
+        angleInput.value = this.value;
+        updateVisualization();
+    });
+    angleInput.addEventListener('input', function() {
+        let val = Math.max(0, Math.min(360, this.value));
+        angleSlider.value = val;
+        updateVisualization();
+    });
+
+    updateVisualization();
+</script>
+
+</body>
+</html>

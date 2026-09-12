@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>之字线插补算法 - 深度剖析版</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg-color: #f8fafc;
+            --panel-bg: #ffffff;
+            --text: #334155;
+            --border: #e2e8f0;
+        }
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container { display: flex; gap: 20px; max-width: 1250px; width: 100%; }
+        .controls {
+            flex: 1; background: var(--panel-bg); padding: 24px;
+            border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; gap: 18px; min-width: 320px;
+        }
+        .canvas-container {
+            flex: 2; background: var(--panel-bg); padding: 10px;
+            border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        canvas { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; }
+        h2 { margin: 0; font-size: 1.25rem; }
+        .control-group label { font-weight: 600; display: flex; justify-content: space-between; margin-bottom: 6px; }
+        input[type=range] { width: 100%; cursor: pointer; }
+        .btn-group { display: flex; gap: 10px; }
+        button {
+            flex: 1; padding: 10px; border: none; border-radius: 6px;
+            background: var(--primary); color: white; font-weight: bold; cursor: pointer;
+        }
+        button:hover { opacity: 0.9; }
+        button.outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
+        .stats { background: #f1f5f9; padding: 15px; border-radius: 8px; font-size: 0.9rem; line-height: 1.8; }
+        .stats span { font-weight: bold; color: var(--primary); }
+        .live-data { background: #eef2ff; border-left: 4px solid var(--primary); padding: 10px 15px; border-radius: 4px; font-family: monospace; font-size: 0.95rem;}
+        .highlight-angle { font-size: 1.1rem; color: #ea580c; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <h2>⚙️ 控制台</h2>
+            
+            <div class="control-group">
+                <label><span>活动阈值 (τ)</span><span id="tau-val">5.0°</span></label>
+                <input type="range" id="tau-slider" min="0.1" max="20" step="0.1" value="5.0">
+            </div>
+
+            <div class="control-group">
+                <label><span>运动进度</span><span id="progress-val">0 / 0 步</span></label>
+                <input type="range" id="progress-slider" min="0" max="100" step="1" value="0">
+            </div>
+
+            <div class="btn-group">
+                <button id="btn-play">播放 / 暂停 (Space)</button>
+                <button id="btn-reset" class="outline">重置</button>
+            </div>
+
+            <div class="stats">
+                <div>目标点: T(80, 35)</div>
+                <div>总步数: <span id="stat-steps">0</span></div>
+                <div>切换次数: <span id="stat-switches">0</span></div>
+                <div>距终点: <span id="stat-dist">0.0</span></div>
+            </div>
+
+            <div class="live-data">
+                <strong>🤖 实时传感器数据</strong><br>
+                当前基向量: <span id="live-dir" style="color: #ea580c;">0.0°</span><br>
+                当前 α 角: <span id="live-alpha" class="highlight-angle">0.00°</span><br>
+                允许边界: [<span id="live-lo">-5.0°</span>, <span id="live-hi">5.0°</span>]
+            </div>
+            
+            <div style="font-size: 0.8rem; color: #64748b;">
+                <strong>图例说明：</strong><br>
+                🔴红点: 终点 | 🟢绿点: 起点 | 🟡黄点: 机器人<br>
+                🟩绿色虚线: 机器人到终点的视线 (P -> T)<br>
+                ⚙️灰色线: 6个可选基向量 (当前选中为橙色粗线)
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="canvas" width="850" height="550"></canvas>
+        </div>
+    </div>
+
+<script>
+const mathUtil = {
+    radians: deg => deg * Math.PI / 180,
+    degrees: rad => rad * 180 / Math.PI,
+    unit: deg => [Math.cos(mathUtil.radians(deg)), Math.sin(mathUtil.radians(deg))],
+    wrap180: a => {
+        let res = a;
+        while (res > 180) res -= 360;
+        while (res <= -180) res += 360;
+        return res;
+    },
+    bearing: (P, T) => mathUtil.degrees(Math.atan2(T[1] - P[1], T[0] - P[0])),
+    dist: (P, T) => Math.hypot(T[0] - P[0], T[1] - P[1])
+};
+
+const CONFIG = {
+    LEG2_AXIS: 0.0,
+    BASIS: [0.0, 60.0, 120.0, 180.0, 240.0, 300.0],
+    STEP: 0.5,
+    R_ARRIVE: 1.0,
+    MAX_STEPS: 10000,
+    P0: [0.0, 0.0],
+    T: [80.0, 35.0]
+};
+
+function alpha_of(P, T) {
+    return mathUtil.wrap180(mathUtil.bearing(P, T) - CONFIG.LEG2_AXIS);
+}
+
+function pick_bracket(P, T) {
+    let g0 = (mathUtil.bearing(P, T) % 360 + 360) % 360;
+    let lo = -Infinity;
+    for (let b of CONFIG.BASIS) { if (b <= g0 && b > lo) lo = b; }
+    return [lo, lo + 60.0];
+}
+
+function interpolate(tau) {
+    let P = [...CONFIG.P0], T = CONFIG.T;
+    let [B, A] = pick_bracket(P, T);
+    let cur = B, other = A;
+    
+    let a0 = alpha_of(P, T);
+    let lo = a0 - tau, hi = a0 + tau;
+    
+    let k = 0, switches = 0;
+    let path = [{ x: P[0], y: P[1], sw: 0, dir: cur, alpha: a0 }];
+
+    while (mathUtil.dist(P, T) > CONFIG.R_ARRIVE && k < CONFIG.MAX_STEPS) {
+        let a = alpha_of(P, T);
+        let [ux, uy] = mathUtil.unit(cur);
+        let P_try = [P[0] + CONFIG.STEP * ux, P[1] + CONFIG.STEP * uy];
+        let push_up = alpha_of(P_try, T) > a;
+
+        if ((push_up && a >= hi) || (!push_up && a <= lo)) {
+            let temp = cur; cur = other; other = temp;
+            switches++;
+        }
+
+        let [nx, ny] = mathUtil.unit(cur);
+        P = [P[0] + CONFIG.STEP * nx, P[1] + CONFIG.STEP * ny];
+        k++;
+        // 记录运动后的新 α
+        let current_a = alpha_of(P, T);
+        path.push({ x: P[0], y: P[1], sw: switches, dir: cur, alpha: current_a });
+    }
+    return { path, a0, tau };
+}
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const tauSlider = document.getElementById('tau-slider');
+const progSlider = document.getElementById('progress-slider');
+let currentData = { path: [], a0: 0, tau: 5.0 };
+let currentFrame = 0, isPlaying = false, animationId = null, playSpeed = 2;
+
+const mapX = x => 50 + x * 7; 
+const mapY = y => canvas.height - 70 - y * 7; 
+
+function drawBase() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let {P0, T} = CONFIG;
+    let sx = mapX(P0[0]), sy = mapY(P0[1]);
+    let tx = mapX(T[0]), ty = mapY(T[1]);
+
+    // 起点到终点的最短虚线
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tx, ty);
+    ctx.strokeStyle = '#cbd5e1'; ctx.setLineDash([5, 5]); ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+    
+    // 起点终点标记
+    ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); 
+    ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(tx, ty, 6, 0, Math.PI*2); ctx.fill(); 
+    ctx.fillStyle = '#64748b'; ctx.font = "12px Arial"; ctx.fillText("T(80, 35)", tx + 10, ty - 10);
+}
+
+function drawPath(frameIndex) {
+    if (currentData.path.length === 0) return;
+    frameIndex = Math.min(frameIndex, currentData.path.length - 1);
+    let curPoint = currentData.path[frameIndex];
+    let cx = mapX(curPoint.x), cy = mapY(curPoint.y);
+    let tx = mapX(CONFIG.T[0]), ty = mapY(CONFIG.T[1]);
+
+    // 1. 画蓝色历史轨迹
+    ctx.beginPath(); ctx.moveTo(mapX(currentData.path[0].x), mapY(currentData.path[0].y));
+    for (let i = 1; i <= frameIndex; i++) ctx.lineTo(mapX(currentData.path[i].x), mapY(currentData.path[i].y));
+    ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = Math.min(1.5, 30 / currentData.tau); ctx.stroke();
+
+    // 2. 动态：画 P 到 T 的绿色连线 (视线)
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty);
+    ctx.strokeStyle = '#10b981'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]);
+
+    // 3. 动态：在 P 点画 6 个基向量罗盘
+    let compassRadius = 35;
+    for (let b of CONFIG.BASIS) {
+        let [vx, vy] = mathUtil.unit(b);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + vx * compassRadius, cy - vy * compassRadius);
+        ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+
+    // 4. 高亮当前选择的基向量
+    let [ux, uy] = mathUtil.unit(curPoint.dir);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + ux * compassRadius, cy - uy * compassRadius);
+    ctx.strokeStyle = '#ea580c'; ctx.lineWidth = 3; ctx.stroke();
+    
+    // 画机器人黄点
+    ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#ca8a04'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    // 更新面板数据
+    document.getElementById('progress-val').innerText = `${frameIndex} / ${currentData.path.length - 1} 步`;
+    document.getElementById('stat-switches').innerText = curPoint.sw;
+    document.getElementById('stat-dist').innerText = mathUtil.dist([curPoint.x, curPoint.y], CONFIG.T).toFixed(2);
+    
+    document.getElementById('live-dir').innerText = curPoint.dir.toFixed(1) + '°';
+    document.getElementById('live-alpha').innerText = curPoint.alpha.toFixed(2) + '°';
+    
+    let loBound = currentData.a0 - currentData.tau;
+    let hiBound = currentData.a0 + currentData.tau;
+    document.getElementById('live-lo').innerText = loBound.toFixed(2) + '°';
+    document.getElementById('live-hi').innerText = hiBound.toFixed(2) + '°';
+
+    // α值触碰边界时变色警示
+    let alphaEl = document.getElementById('live-alpha');
+    if (Math.abs(curPoint.alpha - hiBound) < 0.2 || Math.abs(curPoint.alpha - loBound) < 0.2) {
+        alphaEl.style.color = '#ef4444'; // 碰到边界变红
+    } else {
+        alphaEl.style.color = '#ea580c';
+    }
+}
+
+function render() { drawBase(); drawPath(currentFrame); }
+
+function recalculatePath() {
+    let tau = parseFloat(tauSlider.value);
+    document.getElementById('tau-val').innerText = tau.toFixed(1) + '°';
+    currentData = interpolate(tau);
+    
+    progSlider.max = currentData.path.length - 1;
+    document.getElementById('stat-steps').innerText = currentData.path.length - 1;
+    if (currentFrame >= currentData.path.length) currentFrame = currentData.path.length - 1;
+    progSlider.value = currentFrame;
+    render();
+}
+
+function playLoop() {
+    if (!isPlaying) return;
+    currentFrame += playSpeed;
+    if (currentFrame >= currentData.path.length - 1) { currentFrame = currentData.path.length - 1; isPlaying = false; }
+    progSlider.value = currentFrame;
+    render();
+    if (isPlaying) animationId = requestAnimationFrame(playLoop);
+}
+
+function togglePlay() {
+    isPlaying = !isPlaying;
+    if (isPlaying) { if (currentFrame >= currentData.path.length - 1) currentFrame = 0; playLoop(); }
+    else { cancelAnimationFrame(animationId); }
+}
+
+tauSlider.addEventListener('input', recalculatePath);
+progSlider.addEventListener('input', (e) => { isPlaying = false; currentFrame = parseInt(e.target.value); render(); });
+document.getElementById('btn-play').addEventListener('click', togglePlay);
+document.getElementById('btn-reset').addEventListener('click', () => { isPlaying = false; currentFrame = 0; progSlider.value = 0; tauSlider.value = 5.0; recalculatePath(); });
+document.addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); togglePlay(); } });
+
+recalculatePath();
+</script>
+</body>
+</html>
