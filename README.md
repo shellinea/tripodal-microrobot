@@ -13,7 +13,7 @@
 ## 当前进度（更新 2026-09-12）
 
 - [x] 文献调研与机理拆解（驱动原理 / 插补算法 / K(θ) 力分配 / PTP 导航 / 通信链路）
-- [x] 机械建模（SolidWorks 整机建模，STEP/STL 导出整理中）
+- [x] 机械建模（SolidWorks 装配体与零件，STEP/STL 已发布于 `model/`）
 - [x] 控制算法 MIL 仿真：L1–L5 五个关卡全部通过验收
 - [ ] ESP32 固件开发（三路波形生成 / 插补移植 / PTP 导航）
 - [ ] 板载电路 PCB 设计
@@ -42,7 +42,7 @@ python simulation/L5_ptp.py    # L1 ~ L4 同理，按关卡编号递进
 
 1. `simulation/` —— 控制算法 MIL 数值仿真（Python + matplotlib）与交互式 HTML 动画
 2. `docs/` —— 文献调研笔记、MIL 仿真教程、答疑笔记与结果图
-3. `model/` —— 机械模型（SolidWorks，STEP/STL 导出整理中）
+3. `model/` —— 机械模型（SolidWorks 导出的 STEP/STL，STL 点击可在网页直接 3D 预览）
 4. `host/` —— 机器人模拟服务器（上位机联调用，后续扩展为上位机源码）
 
 ## 声明
