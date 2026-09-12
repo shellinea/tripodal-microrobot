@@ -2,7 +2,12 @@
 
 > 面向精密微操作应用的高精度压电驱动微型机器人：借鉴文献 [1] 提出的三足构型与全向运动机理，自主完成机械建模、控制算法设计与 MIL 数值仿真，目前正推进固件与板载电路开发。
 
-![PTP 闭环导航仿真](docs/images/ptp.gif)
+<p align="center">
+  <img src="docs/images/cad_assembly.png" width="46%" alt="整机装配体（SolidWorks）"/>
+  <img src="docs/images/ptp.gif" width="46%" alt="PTP 闭环导航 MIL 仿真"/>
+</p>
+
+> 左：整机机械模型（三腿装配体）｜ 右：PTP 闭环导航 MIL 仿真动画
 
 ## 项目简介
 
