@@ -36,6 +36,10 @@
 
 数值方法与逐行讲解见 [docs/MIL算法仿真教程.md](docs/MIL算法仿真教程.md)，实现思考见 [docs/MIL算法答疑-L2与L3.md](docs/MIL算法答疑-L2与L3.md)，交互式动画见 `simulation/motion_sim_L2.html` 与 `simulation/motion_sim_L4.html`（浏览器直接打开）。
 
+PTP 闭环导航三组对照实验（无补偿 → 有补偿 → 补偿+PID，最大横向偏差 25.12 → 0.24 → 0.05）：
+
+![PTP 闭环导航三组对照实验](docs/images/l5_ptp.png)
+
 ## 如何运行
 
 ```bash
